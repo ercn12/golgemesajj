@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gölge Mesajlaşma</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            overscroll-behavior: none;
+        }
+        textarea:focus, input:focus, div[contenteditable="true"]:focus {
+            outline: none !important;
+            box-shadow: none !important;
+        }
+        textarea::-webkit-scrollbar, main::-webkit-scrollbar, .modal-content::-webkit-scrollbar {
+            width: 6px;
+        }
+        textarea::-webkit-scrollbar-thumb, main::-webkit-scrollbar-thumb, .modal-content::-webkit-scrollbar-thumb {
+            background-color: #A1A1AA; /* zinc-400 */
+            border-radius: 10px;
+        }
+        textarea, main, .modal-content {
+            -ms-overflow-style: none;
+            scrollbar-width: thin;
+            scrollbar-color: #A1A1AA transparent;
+        }
+        .sent-message-bubble {
+            background-color: #DCF8C6;
+            color: #1F2937;
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.75rem;
+            border-bottom-right-radius: 0.25rem;
+            max-width: 75%;
+            box-shadow: 0 1px 1px rgba(0,0,0,0.08);
+            word-wrap: break-word;
+            align-self: flex-end;
+            line-height: 1.4;
+        }
+        .sent-message-animation { animation: messageDisappear 2s forwards ease-in-out; }
+        @keyframes messageDisappear {
+            0% { opacity: 1; transform: translateY(0) scale(1); }
+            30% { opacity: 0.9; transform: translateY(-10px) scale(1.03); }
+            100% { opacity: 0; transform: translateY(-80px) scale(0.6); }
+        }
+        @keyframes headShake {
+          0% { transform: translateX(0); }
+          6.5% { transform: translateX(-5px) rotate(-1deg); }
+          18.5% { transform: translateX(4px) rotate(1deg); }
+          31.5% { transform: translateX(-3px) rotate(-1deg); }
+          43.5% { transform: translateX(2px) rotate(1deg); }
+          50% { transform: translateX(0); }
+        }
+        .animate-head-shake { animation: headShake 0.7s ease-in-out; }
+        .mic-active-pulse { animation: micPulse 1.5s infinite ease-in-out; }
+        @keyframes micPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+            50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+        }
+        [contenteditable="true"]:empty:before {
+            content: attr(placeholder);
+            pointer-events: none;
+            display: block;
+            color: #D1D5DB;
+        }
+        #recipientNameDisplay[contenteditable="true"]:empty:before {
+             color: rgba(255, 255, 255, 0.7);
+        }
+        .hidden { display: none !important; }
+        .profile-pic-display {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background-color: #E5E7EB;
+            object-fit: cover;
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+        #messageDisplayArea {
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+        }
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background-color: rgba(0, 0, 0, 0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 30;
+            padding: 1rem;
+        }
+        .modal-container {
+            background-color: white;
+            padding: 1.25rem; /* p-5 */
+            border-radius: 0.5rem; /* rounded-lg */
+            box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04); /* shadow-xl */
+            width: 100%;
+            max-width: 28rem; /* max-w-sm for settings, max-w-lg for agreements */
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem; /* mb-4 */
+        }
+        .modal-title {
+            font-size: 1.25rem; /* text-xl */
+            font-weight: 600; /* font-semibold */
+            color: #1F2937; /* text-gray-800 */
+        }
+        .modal-close-button {
+            font-size: 1.5rem; /* text-2xl */
+            color: #6B7280; /* text-gray-500 */
+        }
+        .modal-close-button:hover {
+            color: #1F2937; /* text-gray-800 */
+        }
+        .modal-content {
+            overflow-y: auto;
+            line-height: 1.6;
+            color: #374151; /* text-gray-700 */
+        }
+        .modal-content h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-top: 0.8rem;
+            margin-bottom: 0.4rem;
+            color: #111827; /* text-gray-900 */
+        }
+         .modal-content p, .modal-content li {
+            margin-bottom: 0.6rem;
+        }
+        .modal-content ul {
+            list-style-position: inside;
+            padding-left: 0.5rem;
+        }
+
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 flex flex-col items-center justify-center min-h-screen p-1 sm:p-2 selection:bg-teal-500 selection:text-white">
+
+    <div id="chatView" class="w-full max-w-md h-[95vh] sm:h-[90vh] max-h-[700px] flex flex-col bg-white rounded-lg shadow-2xl shadow-black/30 overflow-hidden">
+        <header class="p-2.5 bg-teal-600 text-white flex items-center gap-2 shadow">
+            <button id="backButtonToInbox" title="Gelen Kutusu (Hayali)" class="p-2 rounded-full hover:bg-teal-700 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
+            </button>
+            <div id="profilePicContainer" class="cursor-pointer">
+                <img id="profilePicDisplay" src="data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23CBD5E0'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E" alt="Profil" class="profile-pic-display">
+            </div>
+            <input type="file" id="profilePicInput" accept="image/*" class="hidden">
+
+            <div id="recipientNameDisplay" contenteditable="true" spellcheck="false"
+                 class="flex-grow text-lg font-semibold focus:outline-none cursor-text whitespace-nowrap overflow-hidden text-ellipsis min-w-[50px] ml-1"
+                 placeholder="Kime (hayali)...">Boşluğa</div>
+
+            <div class="relative">
+                <button id="menuButton" title="Menü" class="p-2 rounded-full hover:bg-teal-700 transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" /></svg>
+                </button>
+                <div id="menuDropdown" class="hidden absolute right-0 mt-2 w-56 bg-white rounded-md shadow-xl z-20 text-gray-800 py-1">
+                    <a href="#" id="changeWallpaperMenu" class="block px-4 py-2 text-sm hover:bg-gray-100">Duvar Kağıdı Değiştir</a>
+                    <a href="#" id="settingsMenu" class="block px-4 py-2 text-sm hover:bg-gray-100">Ayarlar</a>
+                </div>
+            </div>
+        </header>
+        <input type="file" id="wallpaperInput" accept="image/*" class="hidden">
+
+        <main id="messageDisplayArea" class="flex-grow p-3 sm:p-4 space-y-2.5 overflow-y-auto flex flex-col-reverse bg-stone-100">
+            </main>
+
+        <footer class="p-2 bg-gray-100 border-t border-gray-200 flex items-end gap-2">
+            <textarea id="messageInput" class="flex-grow bg-white border border-gray-300 text-gray-800 resize-none focus:outline-none p-2.5 px-3.5 rounded-2xl placeholder-gray-500 text-base leading-tight" placeholder="Mesajını yaz..." rows="1"></textarea>
+            <button id="micButton" title="Sesle Yaz" class="p-3 text-gray-600 hover:text-teal-600 rounded-full transition-colors focus:outline-none self-end mb-px">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15c-2.485 0-4.5-2.015-4.5-4.5V5.25c0-2.485 2.015-4.5 4.5-4.5s4.5 2.015 4.5 4.5v5.25c0 2.485-2.015 4.5-4.5 4.5z" /></svg>
+            </button>
+            <button id="sendButton" title="Gönder" class="p-3 bg-teal-500 hover:bg-teal-600 text-white rounded-full shadow-md transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-teal-400 focus:ring-opacity-50 self-end mb-px">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" /></svg>
+            </button>
+        </footer>
+    </div>
+
+    <div id="inboxView" class="hidden w-full max-w-md h-[95vh] sm:h-[90vh] max-h-[700px] flex flex-col bg-white rounded-lg shadow-2xl shadow-black/30 overflow-hidden">
+        <header class="p-3 bg-teal-600 text-white flex items-center shadow gap-3">
+             <button id="backToChatFromInbox" title="Sohbete Dön" class="p-2 rounded-full hover:bg-teal-700 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
+            </button>
+            <h1 class="text-xl font-semibold">Gölge Mesajlar</h1>
+        </header>
+        <main id="fakeInboxList" class="flex-grow overflow-y-auto">
+            </main>
+         <footer class="p-3 bg-gray-100 border-t border-gray-200 flex justify-center">
+            <p class="text-xs text-gray-500">Bu sadece hayali bir gelen kutusudur.</p>
+        </footer>
+    </div>
+
+    <div id="settingsView" class="hidden modal-overlay">
+        <div class="modal-container max-w-sm">
+            <div class="modal-header">
+                <h2 class="modal-title">Ayarlar</h2>
+                <button id="closeSettingsButton" class="modal-close-button">&times;</button>
+            </div>
+            <ul class="space-y-1 text-gray-700 modal-content">
+                <li><button id="resetWallpaperButton" class="w-full text-left p-3 hover:bg-gray-100 rounded flex items-center gap-3"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-gray-500"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" /></svg>Sohbet Duvar Kağıdını Sıfırla</button></li>
+                <li><button id="removeProfilePicButton" class="w-full text-left p-3 hover:bg-gray-100 rounded flex items-center gap-3"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-gray-500"><path stroke-linecap="round" stroke-linejoin="round" d="M17.982 18.725A7.488 7.488 0 0012 15.75a7.488 7.488 0 00-5.982 2.975m11.963 0a9 9 0 10-11.963 0m11.963 0A8.966 8.966 0 0112 21a8.966 8.966 0 01-5.982-2.275M15 9.75a3 3 0 11-6 0 3 3 0 016 0z" /></svg>Profil Resmini Kaldır</button></li>
+                <li class="border-t my-2"></li>
+                <li><button id="userAgreementMenuButton" class="w-full text-left p-3 hover:bg-gray-100 rounded flex items-center gap-3"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-gray-500"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>Kullanıcı Sözleşmesi</button></li>
+                <li><button id="privacyPolicyMenuButton" class="w-full text-left p-3 hover:bg-gray-100 rounded flex items-center gap-3"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-gray-500"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622a11.99 11.99 0 00-.598-3.75h-.152c-3.196 0-6.1-1.248-8.25-3.285z" /></svg>Gizlilik Politikası</button></li>
+                <li class="p-3 text-gray-400 text-xs text-center border-t mt-2 pt-3">Gölge Mesajlaşma v2.1 (WebApp)</li>
+            </ul>
+        </div>
+    </div>
+
+    <div id="userAgreementView" class="hidden modal-overlay">
+        <div class="modal-container max-w-lg">
+            <div class="modal-header">
+                <h2 class="modal-title">Kullanıcı Sözleşmesi</h2>
+                <button id="closeUserAgreementButton" class="modal-close-button">&times;</button>
+            </div>
+            <div id="userAgreementContent" class="modal-content">
+                </div>
+        </div>
+    </div>
+
+    <div id="privacyPolicyView" class="hidden modal-overlay">
+        <div class="modal-container max-w-lg">
+            <div class="modal-header">
+                <h2 class="modal-title">Gizlilik Politikası</h2>
+                <button id="closePrivacyPolicyButton" class="modal-close-button">&times;</button>
+            </div>
+            <div id="privacyPolicyContent" class="modal-content">
+                </div>
+        </div>
+    </div>
+
+
+    <script>
+        // Elementler
+        const messageInput = document.getElementById('messageInput');
+        const micButton = document.getElementById('micButton');
+        const sendButton = document.getElementById('sendButton');
+        const messageDisplayArea = document.getElementById('messageDisplayArea');
+        const recipientNameDisplay = document.getElementById('recipientNameDisplay');
+        
+        const profilePicContainer = document.getElementById('profilePicContainer');
+        const profilePicDisplay = document.getElementById('profilePicDisplay');
+        const profilePicInput = document.getElementById('profilePicInput');
+        
+        const menuButton = document.getElementById('menuButton');
+        const menuDropdown = document.getElementById('menuDropdown');
+        const changeWallpaperMenu = document.getElementById('changeWallpaperMenu');
+        const wallpaperInput = document.getElementById('wallpaperInput');
+        const settingsMenu = document.getElementById('settingsMenu');
+        
+        const settingsView = document.getElementById('settingsView');
+        const closeSettingsButton = document.getElementById('closeSettingsButton');
+        const resetWallpaperButton = document.getElementById('resetWallpaperButton');
+        const removeProfilePicButton = document.getElementById('removeProfilePicButton');
+        const userAgreementMenuButton = document.getElementById('userAgreementMenuButton');
+        const privacyPolicyMenuButton = document.getElementById('privacyPolicyMenuButton');
+
+        const userAgreementView = document.getElementById('userAgreementView');
+        const userAgreementContent = document.getElementById('userAgreementContent');
+        const closeUserAgreementButton = document.getElementById('closeUserAgreementButton');
+        
+        const privacyPolicyView = document.getElementById('privacyPolicyView');
+        const privacyPolicyContent = document.getElementById('privacyPolicyContent');
+        const closePrivacyPolicyButton = document.getElementById('closePrivacyPolicyButton');
+
+        const chatView = document.getElementById('chatView');
+        const inboxView = document.getElementById('inboxView');
+        const backButtonToInbox = document.getElementById('backButtonToInbox');
+        const backToChatFromInbox = document.getElementById('backToChatFromInbox');
+        const fakeInboxList = document.getElementById('fakeInboxList');
+
+        let messageSynth;
+        let recognition;
+        let isListening = false;
+        let currentSpeechTranscript = '';
+        const defaultProfilePicSVG = "data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23CBD5E0'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E";
+
+        // --- SÖZLEŞME METİNLERİ ---
+        const userAgreementText = `
+            <h3>1. Uygulamanın Amacı ve İşleyişi</h3>
+            <p>1.1. Gölge Mesajlaşma, kullanıcıların anlık, geçici mesajlar yazmasına ve bu mesajların gönderildikten hemen sonra Uygulama içerisinden kalıcı olarak silinmesine olanak tanıyan bir mobil uygulamadır.</p>
+            <p>1.2. Uygulama, kullanıcı mesajlarını saklamaz, kaydetmez veya herhangi bir sunucuda depolamaz.</p>
+            <p>1.3. Uygulama, kullanıcıların hesap oluşturmasını gerektirmez ve anonim bir kullanım sunar.</p>
+            <p>1.4. Kullanıcılar, isteğe bağlı olarak sohbet arka planını ve hayali profil resmini cihaz galerisinden seçtikleri görsellerle kişiselleştirebilirler. Bu görsellerin yolları, yalnızca kullanıcının cihazında yerel olarak saklanır.</p>
+            <h3>2. Kullanıcı Yükümlülükleri</h3>
+            <p>2.1. Kullanıcı, Uygulama'yı yürürlükteki tüm yerel, ulusal ve uluslararası yasalara ve düzenlemelere uygun olarak kullanmayı kabul eder.</p>
+            <p>2.2. Kullanıcı, Uygulama'yı yasa dışı, taciz edici, tehditkar, zararlı, başkalarının gizliliğini ihlal eden veya başka bir şekilde sakıncalı içerik göndermek için kullanmayacaktır.</p>
+            <p>2.3. Kullanıcı, Uygulama'nın geçici ve anlık mesajlaşma doğasını anladığını ve önemli bilgileri, kalıcı kayıtları veya yedekleri saklamak için Uygulama'yı kullanmayacağını kabul eder.</p>
+            <p>2.4. Kullanıcı, profil resmi veya duvar kağıdı olarak seçtiği görsellerin telif haklarından ve yasal uygunluğundan kendisi sorumludur.</p>
+            <p>2.5. Kullanıcı, sesle yazma özelliğini kullanırken mikrofon izninin, galeri özelliklerini kullanırken ise depolama/galeri izninin Uygulama tarafından talep edileceğini ve bu izinlerin verilmesinin özelliğin çalışması için gerekli olduğunu anlar.</p>
+            <h3>3. Fikri Mülkiyet Hakları</h3>
+            <p>3.1. Uygulama'nın kendisi, tasarımı, kaynak kodu, markası ve ilgili tüm fikri mülkiyet hakları Geliştirici'ye aittir.</p>
+            <p>3.2. Kullanıcının Uygulama aracılığıyla girdiği mesaj içerikleri, gönderildiği anda silindiği için Geliştirici tarafından herhangi bir mülkiyet hakkı iddiasında bulunulmaz. Kullanıcının profil resmi ve duvar kağıdı olarak seçtiği görsellerin mülkiyeti kullanıcıya veya ilgili hak sahiplerine aittir.</p>
+            <h3>4. Sorumluluğun Sınırlandırılması</h3>
+            <p>4.1. Uygulama, "OLDUĞU GİBİ" ve "MEVCUT OLDUĞU ŞEKİLDE" sunulmaktadır. Geliştirici, Uygulama'nın kesintisiz, hatasız veya güvenli olacağına dair açık veya zımni hiçbir garanti vermez.</p>
+            <p>4.2. Uygulama'nın doğası gereği mesajlar saklanmadığından, herhangi bir veri kaybından Geliştirici sorumlu tutulamaz.</p>
+            <p>4.3. Geliştirici, Uygulama'nın kullanımından veya kullanılamamasından kaynaklanabilecek doğrudan, dolaylı, arızi, özel veya sonuç olarak ortaya çıkan zararlardan sorumlu olmayacaktır.</p>
+            <h3>5. Sözleşmenin Değiştirilmesi</h3>
+            <p>5.1. Geliştirici, bu Sözleşme'yi herhangi bir zamanda tek taraflı olarak değiştirme veya güncelleme hakkını saklı tutar. Değişiklikler Uygulama içinde veya uygun bir platformda yayınlandığı anda yürürlüğe girer.</p>
+            <p>5.2. Kullanıcının değişikliklerden sonra Uygulama'yı kullanmaya devam etmesi, güncellenmiş Sözleşme'yi kabul ettiği anlamına gelir.</p>
+            <h3>6. Yürürlük ve Fesih</h3>
+            <p>6.1. Bu Sözleşme, Kullanıcı Uygulama'yı kullanmaya başladığı anda yürürlüğe girer ve Kullanıcı Uygulama'yı kullanmayı bıraktığında veya sildiğinde sona erer.</p>
+            <p>6.2. Geliştirici, Kullanıcı'nın bu Sözleşme'yi ihlal etmesi durumunda, önceden bildirimde bulunmaksızın Kullanıcı'nın Uygulama'ya erişimini sonlandırma hakkını saklı tutar.</p>
+            <h3>7. Uygulanacak Hukuk ve Yetkili Mahkeme</h3>
+            <p>7.1. Bu Sözleşme, Türkiye Cumhuriyeti yasalarına tabi olacak ve bu yasalara göre yorumlanacaktır.</p>
+            <p>7.2. Bu Sözleşme'den kaynaklanan veya bu Sözleşme ile bağlantılı her türlü uyuşmazlıkta İstanbul (Merkez) Mahkemeleri ve İcra Daireleri yetkilidir.</p>
+            <h3>8. İletişim</h3>
+            <p>Sözleşme ile ilgili herhangi bir sorunuz veya geri bildiriminiz için lütfen [Geliştirici E-posta Adresi] üzerinden Geliştirici ile iletişime geçiniz.</p>
+        `;
+
+        const privacyPolicyText = `
+            <h3>1. Toplanmayan Bilgiler</h3>
+            <p>Uygulamamızın temel prensibi gizliliktir ve mesajlarınızın geçici olmasıdır. Bu doğrultuda:</p>
+            <ul>
+                <li>1.1. <strong>Mesaj İçerikleri:</strong> Yazdığınız veya sesle dikte ettiğiniz mesajlar Uygulama tarafından sunucularımızda veya cihazınızda kalıcı olarak <strong>SAKLANMAZ, KAYDEDİLMEZ veya ÜÇÜNCÜ TARAFLARLA PAYLAŞILMAZ.</strong> Mesajlar, gönderildikten hemen sonra Uygulama içerisinden silinir.</li>
+                <li>1.2. <strong>Kişisel Kimlik Bilgileri:</strong> Uygulama, adınız, e-posta adresiniz, telefon numaranız gibi kişisel kimlik bilgilerinizi toplamak için bir hesap oluşturmanızı <strong>GEREKTİRMEZ</strong> ve bu tür bilgileri toplamaz.</li>
+            </ul>
+            <h3>2. Uygulama Tarafından Cihazınızda Yerel Olarak Saklanabilecek Bilgiler</h3>
+            <p>Kullanıcı deneyiminizi kişiselleştirmek amacıyla, aşağıdaki bilgiler yalnızca sizin onayınızla ve yalnızca sizin cihazınızda (tarayıcınızın yerel depolama alanında) yerel olarak saklanabilir:</p>
+            <ul>
+                <li>2.1. <strong>Profil Resmi Verisi:</strong> Eğer Uygulama içindeki profil resmi özelliğini kullanmayı seçerseniz, seçtiğiniz görsel (Base64 formatında) yerel olarak saklanır. Bu resim Uygulama dışına gönderilmez.</li>
+                <li>2.2. <strong>Duvar Kağıdı Verisi:</strong> Eğer sohbet arka planı için bir duvar kağıdı seçerseniz, seçtiğiniz görsel (Base64 formatında) yerel olarak saklanır. Bu resim Uygulama dışına gönderilmez.</li>
+            </ul>
+            <p>Bu bilgiler, Uygulama'nın ayarlar menüsünden sizin tarafınızdan silinebilir.</p>
+            <h3>3. İzinler ve Bilgi Kullanımı</h3>
+            <p>Uygulama, belirli özellikleri sağlamak için tarayıcınız aracılığıyla aşağıdaki izinleri isteyebilir:</p>
+            <ul>
+                <li>3.1. <strong>Mikrofon İzni:</strong> "Sesle Yazma" özelliğini kullanabilmeniz için bu izin istenir. Ses verileriniz, mesaj metnine dönüştürülmek üzere tarayıcınızın veya işletim sisteminizin sağladığı konuşma tanıma servisine anlık olarak iletilir. Uygulama, bu ses verilerini <strong>KAYDETMEZ</strong> veya kendi sunucularında saklamaz. Konuşma tanıma servislerinin kendi gizlilik politikaları geçerli olabilir.</li>
+                <li>3.2. <strong>Dosya Seçme (Galeri/Depolama Benzeri):</strong> Profil resmi veya sohbet duvar kağıdı seçebilmeniz için tarayıcınız dosya seçme arayüzünü açar. Uygulama, sadece sizin seçtiğiniz görsellere erişir ve bu görselleri yukarıda belirtildiği gibi yerel olarak saklar.</li>
+            </ul>
+            <h3>4. Bilgilerin Paylaşımı</h3>
+            <p>Uygulama, mesaj içeriklerinizi veya kişisel kimlik bilgilerinizi toplamadığı için bu tür bilgileri üçüncü taraflarla <strong>PAYLAŞMAZ</strong>. Tarayıcınızda yerel olarak saklanan profil resmi veya duvar kağıdı verileri de Uygulama dışına aktarılmaz veya üçüncü taraflarla paylaşılmaz.</p>
+            <h3>5. Veri Güvenliği</h3>
+            <p>5.1. Mesaj içerikleri Uygulama tarafından saklanmadığından, bu tür verilere ilişkin bir güvenlik açığı söz konusu değildir.</p>
+            <p>5.2. Tarayıcınızda yerel olarak saklanan profil resmi ve duvar kağıdı verileri gibi ayar bilgilerinin güvenliği, genel olarak tarayıcınızın ve cihazınızın güvenliğine bağlıdır. Geliştirici, bu yerel verilerin yetkisiz erişime karşı korunması için uygulama düzeyinde makul önlemler alır, ancak tarayıcı veya cihazın genel güvenliğinden sorumlu değildir.</p>
+            <h3>6. Kullanıcı Hakları</h3>
+            <p>6.1. Tarayıcınızda yerel olarak saklanan profil resmi ve duvar kağıdı ayarlarını Uygulama'nın "Ayarlar" menüsünden istediğiniz zaman kaldırabilirsiniz.</p>
+            <p>6.2. Uygulama'nın kullandığı mikrofon ve dosya seçme izinlerini tarayıcınızın ayarlar menüsünden yönetebilir (verebilir veya geri alabilirsiniz). İzinlerin geri alınması ilgili özelliklerin çalışmamasına neden olabilir.</p>
+            <h3>7. Çocukların Gizliliği</h3>
+            <p>Uygulama, 13 yaşın altındaki çocuklardan bilerek kişisel bilgi toplamaz. Eğer 13 yaşın altında bir çocuğun bize bu tür bilgiler sağladığını fark edersek, bu bilgileri sistemlerimizden silmek için adımlar atarız.</p>
+            <h3>8. Bu Gizlilik Politikasındaki Değişiklikler</h3>
+            <p>Bu Gizlilik Politikası zaman zaman güncellenebilir. Herhangi bir değişiklik yapıldığında, yeni politikayı Uygulama içinde veya uygun bir platformda yayınlayacak ve "Son Güncelleme Tarihi"ni değiştireceğiz. Değişikliklerden sonra Uygulama'yı kullanmaya devam etmeniz, güncellenmiş Gizlilik Politikası'nı kabul ettiğiniz anlamına gelir.</p>
+            <h3>9. İletişim</h3>
+            <p>Bu Gizlilik Politikası ile ilgili herhangi bir sorunuz veya endişeniz varsa, lütfen [Geliştirici E-posta Adresi] üzerinden bizimle iletişime geçiniz.</p>
+        `;
+
+
+        // --- SES MOTORU ---
+        async function initializeMessageSound() {
+            if (typeof Tone === 'undefined') { console.warn("Tone.js yüklenemedi."); return; }
+            if (Tone.context.state !== 'running') {
+                try { await Tone.start(); } catch (e) { console.error("Tone.start() failed:", e); return; }
+            }
+            if (!messageSynth) {
+                messageSynth = new Tone.PluckSynth({ attackNoise: 0.2, dampening: 6000, resonance: 0.5 }).toDestination();
+            }
+        }
+        function setupUserInteractionForAudio() {
+            const initAudio = async () => {
+                await initializeMessageSound();
+                document.body.removeEventListener('click', initAudio);
+                document.body.removeEventListener('keydown', initAudio);
+                window.removeEventListener('touchstart', initAudio);
+            };
+            document.body.addEventListener('click', initAudio, { once: true });
+            document.body.addEventListener('keydown', initAudio, { once: true });
+            window.addEventListener('touchstart', initAudio, { once: true });
+        }
+        
+        // --- AYAR YÜKLEME/KAYDETME (localStorage) ---
+        function loadPreferences() {
+            const savedProfilePic = localStorage.getItem('golgeProfilePic');
+            if (savedProfilePic) {
+                profilePicDisplay.src = savedProfilePic;
+            } else {
+                profilePicDisplay.src = defaultProfilePicSVG;
+            }
+
+            const savedWallpaper = localStorage.getItem('golgeWallpaper');
+            if (savedWallpaper) {
+                messageDisplayArea.style.backgroundImage = `url(${savedWallpaper})`;
+                messageDisplayArea.style.backgroundColor = ''; 
+            } else {
+                messageDisplayArea.style.backgroundImage = 'none';
+                messageDisplayArea.style.backgroundColor = '#F5F5F4'; // stone-100
+            }
+        }
+
+        function saveProfilePic(dataUrl) { localStorage.setItem('golgeProfilePic', dataUrl); }
+        function removeLocalProfilePic() {
+            localStorage.removeItem('golgeProfilePic');
+            profilePicDisplay.src = defaultProfilePicSVG;
+        }
+        function saveWallpaper(dataUrl) { localStorage.setItem('golgeWallpaper', dataUrl); }
+        function removeLocalWallpaper() {
+            localStorage.removeItem('golgeWallpaper');
+            messageDisplayArea.style.backgroundImage = 'none';
+            messageDisplayArea.style.backgroundColor = '#F5F5F4';
+        }
+
+        // --- RESİM SEÇME ---
+        profilePicContainer.addEventListener('click', () => profilePicInput.click());
+        profilePicInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    profilePicDisplay.src = e.target.result;
+                    saveProfilePic(e.target.result);
+                }
+                reader.readAsDataURL(file);
+            }
+        });
+
+        changeWallpaperMenu.addEventListener('click', (e) => {
+            e.preventDefault();
+            wallpaperInput.click();
+            menuDropdown.classList.add('hidden');
+        });
+        wallpaperInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    messageDisplayArea.style.backgroundImage = `url(${e.target.result})`;
+                    messageDisplayArea.style.backgroundColor = '';
+                    saveWallpaper(e.target.result);
+                }
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // --- MENÜ VE AYARLAR ---
+        menuButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            menuDropdown.classList.toggle('hidden');
+        });
+        document.addEventListener('click', (e) => {
+            if (!menuButton.contains(e.target) && !menuDropdown.contains(e.target)) {
+                menuDropdown.classList.add('hidden');
+            }
+        });
+
+        settingsMenu.addEventListener('click', (e) => {
+            e.preventDefault();
+            settingsView.classList.remove('hidden');
+            menuDropdown.classList.add('hidden');
+        });
+        closeSettingsButton.addEventListener('click', () => settingsView.classList.add('hidden'));
+        resetWallpaperButton.addEventListener('click', () => {
+            removeLocalWallpaper();
+            alert('Duvar kağıdı sıfırlandı.');
+        });
+        removeProfilePicButton.addEventListener('click', () => {
+            removeLocalProfilePic();
+            alert('Profil resmi kaldırıldı.');
+        });
+
+        // --- SÖZLEŞME MODALLARI ---
+        userAgreementMenuButton.addEventListener('click', (e) => {
+            e.preventDefault();
+            userAgreementContent.innerHTML = userAgreementText;
+            userAgreementView.classList.remove('hidden');
+            settingsView.classList.add('hidden'); // Ayarlar modalını kapat
+        });
+        closeUserAgreementButton.addEventListener('click', () => userAgreementView.classList.add('hidden'));
+        
+        privacyPolicyMenuButton.addEventListener('click', (e) => {
+            e.preventDefault();
+            privacyPolicyContent.innerHTML = privacyPolicyText;
+            privacyPolicyView.classList.remove('hidden');
+            settingsView.classList.add('hidden'); // Ayarlar modalını kapat
+        });
+        closePrivacyPolicyButton.addEventListener('click', () => privacyPolicyView.classList.add('hidden'));
+        
+        // Modalların dışına tıklayınca kapatma
+        [settingsView, userAgreementView, privacyPolicyView].forEach(modal => {
+            if(modal) { // Elementin var olduğundan emin ol
+                modal.addEventListener('click', function(event) {
+                    if (event.target === this) { // Sadece overlay'e tıklandıysa
+                        this.classList.add('hidden');
+                    }
+                });
+            }
+        });
+        
+        // --- GÖRÜNÜM DEĞİŞTİRME (Sohbet <-> Gelen Kutusu) ---
+        function showChatView() {
+            chatView.classList.remove('hidden');
+            inboxView.classList.add('hidden');
+        }
+        function showInboxView() {
+            chatView.classList.add('hidden');
+            inboxView.classList.remove('hidden');
+            renderFakeInbox();
+        }
+        backButtonToInbox.addEventListener('click', showInboxView);
+        backToChatFromInbox.addEventListener('click', showChatView);
+
+        function renderFakeInbox() {
+            const inboxItems = [
+                { avatar: 'A', name: 'Arkadaş 1', msg: 'Harika! Yarın görüşürüz o zaman.', time: '10:32' },
+                { avatar: 'S', name: 'Sırdaşım', msg: 'Buldun mu aradığını?', time: '09:15' },
+                { avatar: 'G', name: 'Grup Sohbeti', msg: 'Herkes katılıyor mu etkinliğe?', time: 'Dün' },
+                { avatar: 'K', name: 'Kendim', msg: 'Alınacaklar: Süt, ekmek...', time: 'Pazartesi' }
+            ];
+            fakeInboxList.innerHTML = inboxItems.map(item => `
+                <div class="flex items-center p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-200" onclick="document.getElementById('backToChatFromInbox').click()">
+                    <img src="data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='50' fill='%23${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}'/%3E%3Ctext x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' font-size='50' fill='white'%3E${item.avatar}%3C/text%3E%3C/svg%3E" class="w-12 h-12 rounded-full mr-3">
+                    <div class="flex-grow">
+                        <div class="flex justify-between items-center">
+                            <h3 class="font-semibold text-gray-700">${item.name}</h3>
+                            <span class="text-xs text-gray-400">${item.time}</span>
+                        </div>
+                        <p class="text-sm text-gray-500 truncate">${item.msg}</p>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // --- METİN ALANI OTOMATİK BÜYÜME ---
+        function autoGrowTextarea(element) {
+            element.style.height = 'auto';
+            const newHeight = Math.min(element.scrollHeight, 100);
+            element.style.height = newHeight + 'px';
+            element.style.overflowY = (element.scrollHeight > newHeight) ? 'auto' : 'hidden';
+        }
+        messageInput.addEventListener('input', () => autoGrowTextarea(messageInput));
+        
+        // --- KONUŞMA TANIMA ---
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'tr-TR';
+
+            recognition.onstart = () => {
+                isListening = true;
+                micButton.classList.add('mic-active-pulse', 'text-red-500');
+                micButton.classList.remove('text-gray-600', 'hover:text-teal-600');
+                micButton.title = "Dinleniyor... Durdurmak için tıkla.";
+                currentSpeechTranscript = messageInput.value;
+                if (currentSpeechTranscript.length > 0 && !currentSpeechTranscript.endsWith(' ')) {
+                    currentSpeechTranscript += ' ';
+                }
+            };
+            recognition.onresult = (event) => {
+                let interim_transcript = '';
+                let final_transcript_part = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) { final_transcript_part += transcript; } 
+                    else { interim_transcript += transcript; }
+                }
+                messageInput.value = currentSpeechTranscript + final_transcript_part + interim_transcript;
+                if (final_transcript_part) { currentSpeechTranscript += final_transcript_part; }
+                autoGrowTextarea(messageInput);
+            };
+            recognition.onerror = (event) => {
+                console.error('Konuşma tanıma hatası:', event.error);
+                micButton.title = "Sesle Yaz (Hata)";
+                if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+                    alert("Mikrofon izni verilmedi veya konuşma tanıma servisi engellendi. Lütfen tarayıcı ayarlarınızı kontrol edin.");
+                }
+                isListening = false;
+                micButton.classList.remove('mic-active-pulse', 'text-red-500');
+                micButton.classList.add('text-gray-600', 'hover:text-teal-600');
+            };
+            recognition.onend = () => {
+                isListening = false;
+                micButton.classList.remove('mic-active-pulse', 'text-red-500');
+                micButton.classList.add('text-gray-600', 'hover:text-teal-600');
+                micButton.title = "Sesle Yaz";
+                messageInput.value = currentSpeechTranscript.trim() + (currentSpeechTranscript.trim() ? ' ' : '');
+                autoGrowTextarea(messageInput);
+            };
+            micButton.addEventListener('click', () => {
+                if (!recognition) return;
+                if (isListening) { recognition.stop(); } 
+                else {
+                    initializeMessageSound();
+                    try { recognition.start(); }
+                    catch(e) { console.error("Recognition start error:", e); alert("Mikrofon başlatılamadı. İzinleri kontrol edin.");}
+                }
+            });
+        } else {
+            micButton.style.display = 'none';
+            console.warn('Konuşma Tanıma API bu tarayıcıda desteklenmiyor.');
+        }
+
+        // --- MESAJ GÖNDERME ---
+        async function sendMessage() {
+            const messageText = messageInput.value.trim();
+            if (messageText === "") {
+                sendButton.classList.add('animate-head-shake');
+                setTimeout(() => sendButton.classList.remove('animate-head-shake'), 700);
+                return;
+            }
+            if (!messageSynth || (typeof Tone !== 'undefined' && Tone.context.state !== 'running')) {
+                await initializeMessageSound();
+            }
+
+            sendButton.disabled = true;
+            micButton.disabled = true;
+            sendButton.classList.add('opacity-60');
+
+            const messageBubble = document.createElement('div');
+            messageBubble.classList.add('sent-message-bubble', 'sent-message-animation');
+            const messageContent = document.createElement('p');
+            messageContent.textContent = messageText;
+            messageBubble.appendChild(messageContent);
+            messageDisplayArea.prepend(messageBubble);
+            messageDisplayArea.scrollTop = 0; 
+
+            if (messageSynth && typeof Tone !== 'undefined' && Tone.context.state === 'running') {
+                messageSynth.triggerAttackRelease("A5", "48n", Tone.now() + 0.01);
+            }
+
+            messageInput.value = "";
+            currentSpeechTranscript = "";
+            autoGrowTextarea(messageInput);
+
+            setTimeout(() => {
+                if (messageDisplayArea.contains(messageBubble)) {
+                    messageDisplayArea.removeChild(messageBubble);
+                }
+                sendButton.disabled = false;
+                micButton.disabled = false;
+                sendButton.classList.remove('opacity-60');
+            }, 2000);
+        }
+        sendButton.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault(); 
+                sendMessage();
+            }
+        });
+        
+        // --- İLK YÜKLEME ---
+        document.addEventListener('DOMContentLoaded', () => {
+            loadPreferences();
+            autoGrowTextarea(messageInput);
+            setupUserInteractionForAudio();
+            showChatView();
+        });
+
+    </script>
+</body>
+</html>
